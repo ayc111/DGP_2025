@@ -1,6 +1,7 @@
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
 #include <cstddef>
 #include <string>
+#include <queue>  
 
 #include "GCore/Components/MeshOperand.h"
 #include "GCore/GOP.h"
@@ -17,10 +18,52 @@ bool find_shortest_path(
     std::list<size_t>& shortest_path_vertex_indices,
     float& distance)
 {
-    // TODO: Implement the shortest path algorithm
-    // You need to fill in `shortest_path_vertex_indices` and `distance`
+    using namespace OpenMesh;
+    using namespace std;
 
-    return false;
+    const size_t V = omesh.n_vertices();  
+    const float INF = numeric_limits<float>::infinity();
+
+    vector<float> dist(V, INF);
+    vector<int> previous(V, -1);
+    priority_queue<pair<float, int>, vector<pair<float, int>>, greater<>> pq;
+
+    size_t start_idx = start_vertex_handle.idx();
+    size_t end_idx = end_vertex_handle.idx();
+
+    dist[start_idx] = 0;
+    pq.emplace(0.0f, start_idx);
+
+    // Dijkstra 
+    while (!pq.empty()) {
+        auto [current_dist, u] = pq.top();
+        pq.pop();
+        if (u == end_idx) break;
+        for (auto vh_it = omesh.cvoh_begin(VertexHandle(u)); vh_it != omesh.cvoh_end(VertexHandle(u)); ++vh_it) {
+            auto heh = *vh_it; 
+            auto vh = omesh.to_vertex_handle(heh);
+            size_t v = vh.idx(); 
+            auto p1 = omesh.point(VertexHandle(u));
+            auto p2 = omesh.point(vh);
+            float edge_weight = (p1 - p2).norm(); 
+            if (dist[u] + edge_weight < dist[v]) {
+                dist[v] = dist[u] + edge_weight;
+                previous[v] = u;
+                pq.emplace(dist[v], v);
+            }
+        }
+    }
+
+    if (dist[end_idx] == INF) {
+        return false;
+    }
+    shortest_path_vertex_indices.clear();
+    for (int v = end_idx; v != -1; v = previous[v]) {
+        shortest_path_vertex_indices.push_front(v);
+    }
+
+    distance = dist[end_idx]; 
+    return true;
 }
 
 NODE_DEF_OPEN_SCOPE
@@ -58,26 +101,22 @@ NODE_EXECUTION_FUNCTION(shortest_path)
 
     // Convert the mesh to OpenMesh
     MyMesh omesh;
-
     // Add vertices
     std::vector<OpenMesh::VertexHandle> vhandles;
-    vhandles.reserve(vertices.size());
-
-    for (auto vertex : vertices) {
-        omesh.add_vertex(OpenMesh::Vec3f(vertex[0], vertex[1], vertex[2]));
+    for (size_t i = 0; i < vertices.size(); i++) {
+        omesh.add_vertex(
+            OpenMesh::Vec3f(vertices[i][0], vertices[i][1], vertices[i][2]));
     }
-
     // Add faces
     size_t start = 0;
-    for (int face_vertex_count : face_vertex_counts) {
+    for (size_t i = 0; i < face_vertex_counts.size(); i++) {
         std::vector<OpenMesh::VertexHandle> face;
-        face.reserve(face_vertex_count);
-        for (int j = 0; j < face_vertex_count; j++) {
+        for (size_t j = 0; j < face_vertex_counts[i]; j++) {
             face.push_back(
                 OpenMesh::VertexHandle(face_vertex_indices[start + j]));
         }
         omesh.add_face(face);
-        start += face_vertex_count;
+        start += face_vertex_counts[i];
     }
 
     auto start_vertex_index =
